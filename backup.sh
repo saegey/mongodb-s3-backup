@@ -17,9 +17,11 @@ usage: $0 options
 This script dumps the current mongo database, tars it, then sends it to an Amazon S3 bucket.
 
 OPTIONS:
-   -h      Show this message
+   -help   Show this message
    -u      Mongodb user
    -p      Mongodb password
+   -h      Mongodb host
+   -port   Mongodb port
    -k      AWS Access Key
    -s      AWS Secret Key
    -r      Amazon S3 region
@@ -27,6 +29,8 @@ OPTIONS:
 EOF
 }
 
+MONGODB_HOST=
+MONGODB_PORT=
 MONGODB_USER=
 MONGODB_PASSWORD=
 AWS_ACCESS_KEY=
@@ -34,12 +38,15 @@ AWS_SECRET_KEY=
 S3_REGION=
 S3_BUCKET=
 
-while getopts “ht:u:p:k:s:r:b:” OPTION
+while getopts “h:m:u:p:k:s:r:b:port” OPTION
 do
+  echo $OPTION
   case $OPTION in
     h)
-      usage
-      exit 1
+      MONGODB_HOST=$OPTARG
+      ;;
+    m)
+      MONGODB_PORT=$OPTARG
       ;;
     u)
       MONGODB_USER=$OPTARG
@@ -59,15 +66,12 @@ do
     b)
       S3_BUCKET=$OPTARG
       ;;
-    ?)
-      usage
-      exit
-    ;;
   esac
 done
 
-if [[ -z $MONGODB_USER ]] || [[ -z $MONGODB_PASSWORD ]] || [[ -z $AWS_ACCESS_KEY ]] || [[ -z $AWS_SECRET_KEY ]] || [[ -z $S3_REGION ]] || [[ -z $S3_BUCKET ]]
+if [[ -z $AWS_ACCESS_KEY ]] || [[ -z $AWS_SECRET_KEY ]] || [[ -z $S3_REGION ]] || [[ -z $S3_BUCKET ]]
 then
+  echo $AWS_ACCESS_KEY
   usage
   exit 1
 fi
@@ -80,15 +84,13 @@ DATE=$(date -u "+%F-%H%M%S")
 FILE_NAME="backup-$DATE"
 ARCHIVE_NAME="$FILE_NAME.tar.gz"
 
-# Lock the database
-# Note there is a bug in mongo 2.2.0 where you must touch all the databases before you run mongodump
-mongo -username "$MONGODB_USER" -password "$MONGODB_PASSWORD" admin --eval "var databaseNames = db.getMongo().getDBNames(); for (var i in databaseNames) { printjson(db.getSiblingDB(databaseNames[i]).getCollectionNames()) }; printjson(db.fsyncLock());"
-
 # Dump the database
-mongodump -username "$MONGODB_USER" -password "$MONGODB_PASSWORD" --out $DIR/backup/$FILE_NAME
-
-# Unlock the database
-mongo -username "$MONGODB_USER" -password "$MONGODB_PASSWORD" admin --eval "printjson(db.fsyncUnlock());"
+if [[ -n "$MONGODB_USER" ]] && [[ -n "$MONGODB_PASSWORD" ]]
+then
+  mongodump --username "$MONGODB_USER" --password "$MONGODB_PASSWORD" --authenticationDatabase "admin" --host "$MONGODB_HOST:$MONGODB_PORT" --out $DIR/backup/$FILE_NAME
+else
+  mongodump --host "$MONGODB_HOST" --out $DIR/backup/$FILE_NAME
+fi
 
 # Tar Gzip the file
 tar -C $DIR/backup/ -zcvf $DIR/backup/$ARCHIVE_NAME $FILE_NAME/
